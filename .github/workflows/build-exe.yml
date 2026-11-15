@@ -25,18 +25,30 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
 
-      - name: Download ffmpeg (Windows)
+      - name: Download ffmpeg + ffprobe (Windows)
         shell: powershell
         run: |
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_dl
           Get-ChildItem ffmpeg_dl -Recurse -Filter ffmpeg.exe | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName -Destination .\ffmpeg.exe }
+          Get-ChildItem ffmpeg_dl -Recurse -Filter ffprobe.exe | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName -Destination .\ffprobe.exe }
           .\ffmpeg.exe -version | Select-Object -First 1
+          .\ffprobe.exe -version | Select-Object -First 1
 
       - name: Build .exe with PyInstaller
         run: |
-          pyinstaller --onefile --clean --noconfirm --name YT-Clip-Tool --console --add-data "static;static" --add-binary "ffmpeg.exe;." --collect-all yt_dlp --collect-all youtube_transcript_api app.py
+          pyinstaller --onefile --clean --noconfirm --name YT-Clip-Tool --console --add-data "static;static" --add-binary "ffmpeg.exe;." --add-binary "ffprobe.exe;." --collect-all yt_dlp --collect-all youtube_transcript_api app.py
           dir dist
+
+      - name: Make portable ZIP (.exe + ffmpeg + ffprobe)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path portable | Out-Null
+          Copy-Item dist\YT-Clip-Tool.exe -Destination portable\
+          Copy-Item ffmpeg.exe -Destination portable\
+          Copy-Item ffprobe.exe -Destination portable\
+          Compress-Archive -Path portable\* -DestinationPath YT-Clip-Tool-Portable.zip -Force
+          Get-ChildItem YT-Clip-Tool-Portable.zip | Select-Object Name, Length
 
       - name: Upload .exe artifact
         uses: actions/upload-artifact@v4
@@ -44,14 +56,25 @@ jobs:
           name: YT-Clip-Tool-Windows
           path: dist/YT-Clip-Tool.exe
 
-      - name: Publish GitHub Release (v1.0.0)
+      - name: Upload portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YT-Clip-Tool-Portable
+          path: YT-Clip-Tool-Portable.zip
+
+      - name: Publish GitHub Release (v1.0.1)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: YT Clip Tool v1.0.0 (Windows)
+          tag_name: v1.0.1
+          name: YT Clip Tool v1.0.1 (Windows)
           body: |
-            Portable Windows .exe — double-click, no Python or ffmpeg install needed.
+            Portable Windows build — double-click, no Python install needed.
+            **Recommended: YT-Clip-Tool-Portable.zip** — extract it anywhere and
+            run YT-Clip-Tool.exe (ffmpeg + ffprobe are included next to it).
+            The single .exe also works, with ffmpeg bundled inside.
             The browser opens at http://127.0.0.1:5000 automatically.
             Search YouTube, read the transcript with timestamps, export a clip
             (start → end) or the full video at 720p MP4.
-          files: dist/YT-Clip-Tool.exe
+          files: |
+            dist/YT-Clip-Tool.exe
+            YT-Clip-Tool-Portable.zip

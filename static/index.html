@@ -4,76 +4,218 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>YT Clip Tool — search, transcript, export clips</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --bg: #0a0a0b;
+    --surface: #131316;
+    --surface-2: #1a1a1e;
+    --border: #26262b;
+    --border-strong: #34343b;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --faint: #71717a;
+    --accent: #a3e635;
+    --accent-2: #65a30d;
+    --accent-soft: rgba(163, 230, 53, .12);
+    --accent-border: rgba(163, 230, 53, .35);
+    --blue: #7fb7ff;
+    --danger: #f87171;
+    --radius: 16px;
+    --shadow: 0 8px 30px rgba(0, 0, 0, .45);
+    --ease: cubic-bezier(.22, 1, .36, 1);
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #0f0f0f; color: #f1f1f1; }
-  header { padding: 14px 20px; background: #161616; border-bottom: 1px solid #2a2a2a; position: sticky; top: 0; z-index: 10; }
-  header h1 { margin: 0 0 10px; font-size: 20px; }
-  header h1 span { color: #95ff50; }
-  .searchrow { display: flex; gap: 8px; }
-  .searchrow input { flex: 1; padding: 11px 14px; font-size: 15px; border-radius: 999px; border: 1px solid #3a3a3a; background: #1f1f1f; color: #fff; outline: none; }
-  .searchrow input:focus { border-color: #95ff50; }
-  button { cursor: pointer; border: none; border-radius: 999px; padding: 11px 18px; font-size: 14px; font-weight: 600; background: #95ff50; color: #111; }
-  button:disabled { opacity: .45; cursor: default; }
-  button.ghost { background: #2a2a2a; color: #eee; }
-  button.small { padding: 4px 9px; font-size: 12px; }
-  main { max-width: 1180px; margin: 0 auto; padding: 16px 20px 60px; }
-  .hint { color: #aaa; font-size: 13px; margin: 6px 0 0; }
-  #status { margin: 14px 0; color: #aaa; font-size: 14px; min-height: 20px; }
-  #status.err { color: #ff7a7a; }
-  /* results */
-  .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-  .card { background: #161616; border: 1px solid #262626; border-radius: 12px; overflow: hidden; cursor: pointer; }
-  .card:hover { border-color: #95ff50; }
-  .thumb { position: relative; aspect-ratio: 16/9; background: #000; }
-  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .dur { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.85); padding: 2px 6px; border-radius: 5px; font-size: 12px; }
-  .card .meta { padding: 10px 12px; }
-  .card .t { font-size: 14px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .card .c { font-size: 12px; color: #aaa; margin-top: 5px; }
-  /* workspace */
-  .work { display: none; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 6px; }
-  .work.on { display: grid; }
-  @media (max-width: 900px) { .work { grid-template-columns: 1fr; } }
-  .panel { background: #161616; border: 1px solid #262626; border-radius: 12px; padding: 14px; }
-  .panel h2 { margin: 0 0 10px; font-size: 16px; }
-  .panel h3 { margin: 14px 0 8px; font-size: 14px; color: #ccc; }
-  #playerWrap { position: relative; aspect-ratio: 16/9; background: #000; border-radius: 10px; overflow: hidden; }
-  #playerWrap iframe { width: 100%; height: 100%; border: 0; }
-  .vidtitle { font-size: 15px; font-weight: 600; margin: 10px 0 2px; }
-  .vidchan { font-size: 13px; color: #aaa; }
-  #transcript { max-height: 430px; overflow-y: auto; border: 1px solid #262626; border-radius: 10px; background: #0f0f0f; }
-  .line { display: flex; gap: 10px; padding: 7px 10px; cursor: pointer; font-size: 14px; line-height: 1.45; align-items: baseline; }
-  .line:hover { background: #1e1e1e; }
-  .line .ts { color: #7fb7ff; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .line.active { background: #243318; }
-  .line.active .txt { color: #d8ffb0; }
-  .line.inrange { background: #1a2a12; }
-  .line .mark { margin-left: auto; display: flex; gap: 4px; }
-  .rangebox { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
-  .rangebox input { width: 74px; padding: 8px 10px; border-radius: 8px; border: 1px solid #3a3a3a; background: #1f1f1f; color: #fff; font-size: 14px; }
-  .rangebox .pill { background: #243318; border: 1px solid #3d5a24; padding: 6px 10px; border-radius: 999px; font-size: 13px; }
-  .opts label { display: inline-flex; gap: 6px; align-items: center; margin-right: 16px; font-size: 14px; cursor: pointer; }
-  #prog { height: 8px; background: #262626; border-radius: 99px; overflow: hidden; margin-top: 10px; display: none; }
-  #prog > div { height: 100%; background: #95ff50; width: 0%; }
-  #dlLink { display: none; margin-top: 12px; }
-  #dlLink a { color: #95ff50; font-weight: 700; font-size: 15px; }
-  .back { margin-bottom: 12px; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  ::selection { background: var(--accent); color: #111; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #2e2e35; border-radius: 99px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---------- header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(10, 10, 11, .82);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px 14px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.03em; }
+  .brand h1 .dot { color: var(--accent); }
+  .brand .tag {
+    font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft);
+    border: 1px solid var(--accent-border); padding: 3px 8px; border-radius: 99px;
+  }
+  .searchrow { display: flex; gap: 10px; margin-top: 14px; max-width: 860px; }
+  .searchwrap { position: relative; flex: 1; }
+  .searchwrap svg { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--faint); pointer-events: none; }
+  .searchwrap input {
+    width: 100%; padding: 13px 16px 13px 46px; font-size: 15px; font-family: inherit;
+    border-radius: 999px; border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--text); outline: none;
+    transition: border-color .2s var(--ease), box-shadow .2s var(--ease), background .2s;
+  }
+  .searchwrap input::placeholder { color: var(--faint); }
+  .searchwrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(163, 230, 53, .14); background: var(--surface-2); }
+  .hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; max-width: 860px; line-height: 1.5; }
+
+  /* ---------- buttons ---------- */
+  button {
+    cursor: pointer; border: none; font-family: inherit;
+    border-radius: 999px; font-weight: 600; font-size: 14px;
+    transition: transform .16s var(--ease), box-shadow .2s var(--ease), background .2s, opacity .2s;
+    will-change: transform;
+  }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: default; transform: none !important; }
+  .btn-primary {
+    padding: 13px 22px; color: #111; background: linear-gradient(180deg, #bef264, var(--accent));
+    box-shadow: 0 4px 18px rgba(163, 230, 53, .28);
+  }
+  .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(163, 230, 53, .38); }
+  .btn-ghost { padding: 11px 18px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong); }
+  .btn-ghost:hover:not(:disabled) { background: #222228; border-color: #3f3f46; }
+  .btn-small { padding: 5px 10px; font-size: 12px; border-radius: 8px; }
+  .btn-chip {
+    padding: 6px 11px; font-size: 12px; background: var(--surface-2); color: var(--muted);
+    border: 1px solid var(--border-strong);
+  }
+  .btn-chip:hover { color: var(--text); border-color: var(--accent-border); background: var(--accent-soft); }
+
+  main { max-width: 1240px; margin: 0 auto; padding: 22px 24px 80px; }
+  #status { margin: 4px 0 16px; color: var(--muted); font-size: 14px; min-height: 20px; transition: color .2s; }
+  #status.err { color: var(--danger); }
+  #status.ok { color: var(--accent); }
+
+  /* ---------- results ---------- */
+  .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden; cursor: pointer;
+    opacity: 0; transform: translateY(14px);
+    animation: rise .5s var(--ease) forwards;
+    transition: transform .25s var(--ease), border-color .25s, box-shadow .25s var(--ease);
+  }
+  .card:hover { transform: translateY(-4px); border-color: var(--accent-border); box-shadow: var(--shadow); }
+  @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+  .thumb { position: relative; aspect-ratio: 16/9; background: #000; overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .45s var(--ease); }
+  .card:hover .thumb img { transform: scale(1.05); }
+  .thumb::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgba(0,0,0,.45)); opacity: 0; transition: opacity .3s; }
+  .card:hover .thumb::after { opacity: 1; }
+  .dur { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.85); padding: 3px 7px; border-radius: 6px; font-size: 12px; font-weight: 600; z-index: 1; }
+  .card .meta { padding: 13px 14px 14px; }
+  .card .t { font-size: 14.5px; font-weight: 600; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .c { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+
+  /* skeleton */
+  .skel { border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
+  .skel .thumb { background: linear-gradient(100deg, #17171a 40%, #1f1f24 50%, #17171a 60%); background-size: 200% 100%; animation: shimmer 1.3s linear infinite; }
+  .skel .ln { height: 12px; border-radius: 6px; margin: 12px 14px 0; background: linear-gradient(100deg, #17171a 40%, #232328 50%, #17171a 60%); background-size: 200% 100%; animation: shimmer 1.3s linear infinite; }
+  .skel .ln.short { width: 55%; margin-bottom: 16px; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  /* ---------- workspace ---------- */
+  .work { display: none; grid-template-columns: 1.55fr 1fr; gap: 20px; margin-top: 4px; }
+  .work.on { display: grid; animation: fadein .4s var(--ease); }
+  @keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @media (max-width: 940px) { .work { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .panel h2 { margin: 0 0 4px; font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+  .panel h3 { margin: 18px 0 10px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .panel .sub { font-size: 13px; color: var(--muted); line-height: 1.55; margin: 0 0 10px; }
+  #playerWrap { position: relative; aspect-ratio: 16/9; background: #000; border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  #playerWrap iframe { width: 100%; height: 100%; border: 0; display: block; }
+  .vidtitle { font-size: 16px; font-weight: 700; margin: 13px 0 3px; line-height: 1.4; letter-spacing: -.01em; }
+  .vidchan { font-size: 13px; color: var(--muted); }
+
+  /* range timeline */
+  .timeline { position: relative; height: 10px; border-radius: 99px; background: #26262b; margin: 14px 0 6px; cursor: pointer; overflow: hidden; }
+  .timeline .sel { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, var(--accent-2), var(--accent)); border-radius: 99px; transition: left .25s var(--ease), width .25s var(--ease); }
+  .timeline .playhead { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; border-radius: 2px; box-shadow: 0 0 6px rgba(255,255,255,.7); }
+  .rangebox { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .rangebox label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 7px; align-items: center; }
+  .rangebox input {
+    width: 78px; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--border-strong);
+    background: var(--surface-2); color: var(--text); font-size: 14px; font-family: inherit; outline: none;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .rangebox input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(163, 230, 53, .14); }
+  .pill {
+    background: var(--accent-soft); border: 1px solid var(--accent-border); color: var(--accent);
+    padding: 7px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 999px; padding: 3px; gap: 2px; }
+  .seg button { padding: 8px 16px; background: transparent; color: var(--muted); border-radius: 999px; }
+  .seg button.on { background: var(--accent); color: #111; box-shadow: 0 2px 10px rgba(163, 230, 53, .3); }
+  .chk { display: inline-flex; gap: 7px; align-items: center; font-size: 13.5px; color: var(--muted); cursor: pointer; user-select: none; }
+  .chk input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+  .exportrow { margin-top: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #prog { height: 8px; background: #26262b; border-radius: 99px; overflow: hidden; margin-top: 14px; display: none; }
+  #prog > div {
+    height: 100%; width: 0%; border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent-2), var(--accent));
+    background-size: 200% 100%; animation: progshift 1.2s linear infinite;
+    transition: width .35s var(--ease);
+  }
+  @keyframes progshift { to { background-position: -200% 0; } }
+  #dlLink { display: none; margin-top: 14px; }
+  #dlLink a {
+    display: inline-flex; align-items: center; gap: 8px; color: #111; font-weight: 700; font-size: 14.5px;
+    background: linear-gradient(180deg, #bef264, var(--accent)); padding: 12px 20px; border-radius: 999px;
+    text-decoration: none; box-shadow: 0 4px 18px rgba(163, 230, 53, .28);
+    transition: transform .16s var(--ease), box-shadow .2s;
+  }
+  #dlLink a:hover { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(163, 230, 53, .38); }
+
+  /* transcript */
+  #transcript { max-height: 480px; overflow-y: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); scroll-behavior: smooth; }
+  .line { display: flex; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: 14px; line-height: 1.5; align-items: baseline; border-left: 3px solid transparent; transition: background .18s, border-color .18s; }
+  .line:hover { background: #17171b; }
+  .line .ts { color: var(--blue); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; padding-top: 1px; }
+  .line .txt { flex: 1; }
+  .line.active { background: rgba(163, 230, 53, .09); border-left-color: var(--accent); }
+  .line.active .txt { color: #e7f9c8; }
+  .line.inrange { background: rgba(163, 230, 53, .06); }
+  .line .mark { display: flex; gap: 5px; opacity: 0; transition: opacity .18s; }
+  .line:hover .mark, .line.active .mark { opacity: 1; }
+  .back { margin-bottom: 14px; }
+  .empty { padding: 34px 20px; text-align: center; color: var(--faint); font-size: 14px; }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>YT <span>Clip Tool</span></h1>
+  <div class="brand">
+    <h1>YT Clip<span class="dot">.</span>Tool</h1>
+    <span class="tag">720p &middot; MP4</span>
+  </div>
   <div class="searchrow">
-    <input id="q" type="text" placeholder="Search YouTube by topic or creator — or paste a video link" autocomplete="off">
-    <button id="searchBtn">Search</button>
+    <div class="searchwrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="text" placeholder="Search YouTube by topic or creator — or paste a video link" autocomplete="off">
+    </div>
+    <button class="btn-primary" id="searchBtn">Search</button>
   </div>
   <p class="hint">Transcript loads instantly with timestamps. Click a line to jump. Set a start and end, then export the clip — or the full video — at 720p MP4.</p>
 </header>
 
 <main>
   <div id="status"></div>
-  <button class="ghost back" id="backBtn" style="display:none">← Back to results</button>
+  <button class="btn-ghost back" id="backBtn" style="display:none">&larr; Back to results</button>
 
   <div class="results" id="results"></div>
 
@@ -84,30 +226,37 @@
       <div class="vidchan" id="vidChan"></div>
 
       <h3>Clip range</h3>
+      <div class="timeline" id="timeline" title="Click to seek">
+        <div class="sel" id="timelineSel" style="left:0%;width:0%"></div>
+        <div class="playhead" id="playhead" style="left:0%"></div>
+      </div>
       <div class="rangebox">
-        <label>Start (s) <input id="startInput" type="number" min="0" step="0.1" value="0"></label>
-        <label>End (s) <input id="endInput" type="number" min="0" step="0.1" value="0"></label>
+        <label>Start <input id="startInput" type="number" min="0" step="0.1" value="0"></label>
+        <label>End <input id="endInput" type="number" min="0" step="0.1" value="0"></label>
         <span class="pill" id="rangeLabel">—</span>
-        <button class="ghost small" id="clearRange">Clear</button>
+        <button class="btn-chip" id="clearRange">Clear</button>
       </div>
 
       <h3>Export</h3>
       <div class="opts">
-        <label><input type="radio" name="mode" value="clip" checked> Clip (start → end)</label>
-        <label><input type="radio" name="mode" value="full"> Full video</label>
-        <label><input type="checkbox" id="precise"> Precise cut (slower, re-encodes)</label>
+        <div class="seg" id="modeSeg">
+          <button data-mode="clip" class="on">Clip</button>
+          <button data-mode="full">Full video</button>
+        </div>
+        <label class="chk"><input type="checkbox" id="precise"> Precise cut <span style="color:var(--faint)">(slower, re-encodes)</span></label>
       </div>
-      <p class="hint">720p MP4. Fast mode cuts at the nearest keyframe (instant). Precise mode re-encodes for frame-accurate cuts.</p>
-      <div style="margin-top:12px; display:flex; gap:8px;">
-        <button id="exportBtn">Export MP4</button>
+      <p class="sub" style="margin-top:10px;">720p MP4. Fast mode cuts at the nearest keyframe (instant). Precise mode re-encodes for frame-accurate cuts.</p>
+      <div class="exportrow">
+        <button class="btn-primary" id="exportBtn">Export MP4</button>
+        <span id="ffState" style="font-size:12.5px;color:var(--faint)"></span>
       </div>
       <div id="prog"><div></div></div>
       <div id="dlLink"></div>
     </div>
 
     <div class="panel">
-      <h2>Transcript <span id="trLang" style="color:#aaa; font-size:12px; font-weight:400;"></span></h2>
-      <div class="hint" style="margin:0 0 10px;">Click a line to jump there. Use S / E on a line to set it as start / end.</div>
+      <h2>Transcript <span id="trLang" style="color:var(--muted); font-size:12px; font-weight:500;"></span></h2>
+      <p class="sub">Click a line to jump there. Use <b>S</b> / <b>E</b> on a line to set it as start / end.</p>
       <div id="transcript"></div>
     </div>
   </div>
@@ -117,7 +266,7 @@
 <script>
 const $ = s => document.querySelector(s);
 let player = null, playerReady = false, currentVideo = null, segments = [], syncTimer = null;
-let startSec = 0, endSec = 0;
+let startSec = 0, endSec = 0, mode = 'clip', videoDur = 0;
 
 function fmt(s) {
   s = Math.max(0, Math.round(s));
@@ -125,35 +274,58 @@ function fmt(s) {
   return h ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
            : `${m}:${String(sec).padStart(2,'0')}`;
 }
-function setStatus(msg, isErr) {
+function setStatus(msg, kind) {
   const el = $('#status');
   el.textContent = msg || '';
-  el.classList.toggle('err', !!isErr);
+  el.className = kind || '';
+  el.id = 'status';
+}
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function checkHealth() {
+  try {
+    const d = await (await fetch('/api/health')).json();
+    $('#ffState').textContent = d.ffmpeg ? 'ffmpeg ready' : 'ffmpeg missing — clip export needs ffmpeg.exe next to the app';
+    $('#ffState').style.color = d.ffmpeg ? 'var(--accent)' : 'var(--danger)';
+  } catch (e) { /* ignore */ }
+}
+checkHealth();
+
+function skeleton(n) {
+  const box = $('#results');
+  box.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const d = document.createElement('div');
+    d.className = 'skel';
+    d.innerHTML = '<div class="thumb"></div><div class="ln"></div><div class="ln short"></div>';
+    box.appendChild(d);
+  }
 }
 
 async function doSearch() {
   const q = $('#q').value.trim();
   if (!q) return;
-  setStatus('Searching...');
-  $('#results').innerHTML = '';
+  setStatus('Searching YouTube…');
+  skeleton(6);
   try {
     const r = await fetch('/api/search?q=' + encodeURIComponent(q));
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Search failed');
-    if (!d.results.length) { setStatus('No results.', true); return; }
-    setStatus(`${d.results.length} results — click a video to open it.`);
+    if (!d.results.length) { $('#results').innerHTML = '<div class="empty">No results found.</div>'; setStatus('No results.', 'err'); return; }
+    setStatus(`${d.results.length} results — click a video to open it.`, 'ok');
     const box = $('#results');
-    d.results.forEach(v => {
+    box.innerHTML = '';
+    d.results.forEach((v, i) => {
       const card = document.createElement('div');
       card.className = 'card';
+      card.style.animationDelay = (i * 45) + 'ms';
       card.innerHTML = `<div class="thumb"><img src="${v.thumbnail}" alt="" loading="lazy"><span class="dur">${fmt(v.duration)}</span></div>
         <div class="meta"><div class="t">${escapeHtml(v.title)}</div><div class="c">${escapeHtml(v.uploader || '')}</div></div>`;
       card.onclick = () => openVideo(v);
       box.appendChild(card);
     });
-  } catch (e) { setStatus('Search failed: ' + e.message, true); }
+  } catch (e) { $('#results').innerHTML = ''; setStatus('Search failed: ' + e.message, 'err'); }
 }
-function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 function onYouTubeIframeAPIReady() { playerReady = true; if (currentVideo) loadPlayer(); }
 function loadPlayer() {
@@ -168,14 +340,14 @@ function loadPlayer() {
 
 async function openVideo(v) {
   currentVideo = v;
-  segments = []; startSec = 0; endSec = 0;
+  segments = []; startSec = 0; endSec = 0; videoDur = v.duration || 0;
   $('#startInput').value = 0; $('#endInput').value = 0; updateRangeLabel();
   $('#results').style.display = 'none';
   $('#work').classList.add('on');
   $('#backBtn').style.display = '';
   $('#vidTitle').textContent = v.title;
   $('#vidChan').textContent = v.uploader || '';
-  $('#transcript').innerHTML = '<div class="line"><span class="txt" style="color:#aaa">Loading transcript…</span></div>';
+  $('#transcript').innerHTML = '<div class="empty">Loading transcript…</div>';
   $('#dlLink').style.display = 'none'; $('#prog').style.display = 'none';
   loadPlayer();
   try {
@@ -185,12 +357,12 @@ async function openVideo(v) {
     segments = d.segments || [];
     $('#trLang').textContent = `(${d.language}${d.is_generated ? ', auto-generated' : ''})`;
     renderTranscript();
-    setStatus(`Transcript ready — ${segments.length} lines, ${d.language}.`);
-    if (endSec === 0) { $('#endInput').value = Math.min(v.duration || 0, 30); endSec = Math.min(v.duration || 0, 30); updateRangeLabel(); }
+    setStatus(`Transcript ready — ${segments.length} lines, ${d.language}.`, 'ok');
+    if (videoDur) { endSec = Math.min(videoDur, 30); $('#endInput').value = endSec; updateRangeLabel(); }
     startSync();
   } catch (e) {
-    $('#transcript').innerHTML = '<div class="line"><span class="txt" style="color:#ff7a7a">No transcript for this video.</span></div>';
-    setStatus('No transcript for this video: ' + e.message, true);
+    $('#transcript').innerHTML = '<div class="empty">No transcript for this video.</div>';
+    setStatus('No transcript for this video: ' + e.message, 'err');
   }
 }
 
@@ -202,7 +374,7 @@ function renderTranscript() {
     div.className = 'line';
     div.dataset.i = i;
     div.innerHTML = `<span class="ts">${fmt(s.start)}</span><span class="txt">${escapeHtml(s.text)}</span>
-      <span class="mark"><button class="ghost small" data-s="${s.start}">S</button><button class="ghost small" data-e="${s.start + s.duration}">E</button></span>`;
+      <span class="mark"><button class="btn-chip btn-small" data-s="${s.start}">S</button><button class="btn-chip btn-small" data-e="${s.start + s.duration}">E</button></span>`;
     div.onclick = (e) => {
       if (e.target.tagName === 'BUTTON') return;
       seekTo(s.start);
@@ -218,7 +390,12 @@ function setStart(t) { startSec = Math.max(0, t); $('#startInput').value = start
 function setEnd(t) { endSec = Math.max(0, t); $('#endInput').value = endSec.toFixed(1); updateRangeLabel(); paintRange(); }
 function updateRangeLabel() {
   const dur = endSec > startSec ? (endSec - startSec) : 0;
-  $('#rangeLabel').textContent = dur ? `Clip: ${fmt(startSec)} → ${fmt(endSec)} (${dur.toFixed(1)}s)` : 'Set a start and end';
+  $('#rangeLabel').textContent = dur ? `Clip: ${fmt(startSec)} → ${fmt(endSec)} · ${dur.toFixed(1)}s` : 'Set a start and end';
+  const sel = $('#timelineSel');
+  if (videoDur > 0 && dur > 0) {
+    sel.style.left = (startSec / videoDur * 100) + '%';
+    sel.style.width = (dur / videoDur * 100) + '%';
+  } else { sel.style.left = '0%'; sel.style.width = '0%'; }
 }
 function paintRange() {
   document.querySelectorAll('#transcript .line').forEach(el => {
@@ -233,6 +410,7 @@ function startSync() {
     if (!player || !player.getCurrentTime) return;
     let t;
     try { t = player.getCurrentTime(); } catch (e) { return; }
+    if (videoDur > 0) $('#playhead').style.left = Math.min(100, t / videoDur * 100) + '%';
     let idx = -1;
     for (let i = 0; i < segments.length; i++) {
       if (segments[i].start <= t) idx = i; else break;
@@ -249,15 +427,14 @@ function startSync() {
         }
       }
     }
-  }, 300);
+  }, 200);
 }
 function stopSync() { if (syncTimer) { clearInterval(syncTimer); syncTimer = null; } }
 
 async function doExport() {
   if (!currentVideo) return;
-  const mode = document.querySelector('input[name="mode"]:checked').value;
   const precise = $('#precise').checked;
-  if (mode === 'clip' && !(endSec > startSec)) { setStatus('Set a start and end first (or pick Full video).', true); return; }
+  if (mode === 'clip' && !(endSec > startSec)) { setStatus('Set a start and end first (or pick Full video).', 'err'); return; }
   const btn = $('#exportBtn');
   btn.disabled = true;
   $('#dlLink').style.display = 'none';
@@ -278,19 +455,19 @@ async function doExport() {
         $('#prog > div').style.width = (s.progress || 0) + '%';
         if (s.status === 'done') {
           clearInterval(poll); btn.disabled = false;
-          setStatus(`Done — ${(s.size / 1048576).toFixed(1)} MB.`);
+          setStatus(`Done — ${(s.size / 1048576).toFixed(1)} MB.`, 'ok');
           const dl = $('#dlLink');
-          dl.innerHTML = `<a href="/api/download/${jobId}" download>⬇ Download ${escapeHtml(s.filename)}</a>`;
+          dl.innerHTML = `<a href="/api/download/${jobId}" download>&#11015; Download ${escapeHtml(s.filename)}</a>`;
           dl.style.display = 'block';
         } else if (s.status === 'error') {
           clearInterval(poll); btn.disabled = false;
-          setStatus('Export failed: ' + (s.error || 'unknown error'), true);
+          setStatus('Export failed: ' + (s.error || 'unknown error'), 'err');
         } else {
           setStatus((s.message || 'Working…') + ` ${Math.round(s.progress || 0)}%`);
         }
-      } catch (e) { clearInterval(poll); btn.disabled = false; setStatus('Status check failed: ' + e.message, true); }
+      } catch (e) { clearInterval(poll); btn.disabled = false; setStatus('Status check failed: ' + e.message, 'err'); }
     }, 1000);
-  } catch (e) { btn.disabled = false; setStatus('Export failed: ' + e.message, true); }
+  } catch (e) { btn.disabled = false; setStatus('Export failed: ' + e.message, 'err'); }
 }
 
 $('#searchBtn').onclick = doSearch;
@@ -299,6 +476,19 @@ $('#exportBtn').onclick = doExport;
 $('#startInput').onchange = e => setStart(parseFloat(e.target.value) || 0);
 $('#endInput').onchange = e => setEnd(parseFloat(e.target.value) || 0);
 $('#clearRange').onclick = () => { startSec = 0; endSec = 0; $('#startInput').value = 0; $('#endInput').value = 0; updateRangeLabel(); paintRange(); };
+$('#timeline').onclick = e => {
+  if (!videoDur || !player) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const t = (e.clientX - rect.left) / rect.width * videoDur;
+  seekTo(t);
+};
+document.querySelectorAll('#modeSeg button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('#modeSeg button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    mode = b.dataset.mode;
+  };
+});
 $('#backBtn').onclick = () => {
   stopSync();
   $('#work').classList.remove('on');

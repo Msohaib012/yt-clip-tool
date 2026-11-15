@@ -57,16 +57,36 @@ def safe_filename(name: str) -> str:
     return (name or "video")[:120]
 
 
-def _ffmpeg_location():
-    """Bundled ffmpeg.exe (PyInstaller) if present, else None (system PATH)."""
+def _ffmpeg_dir():
+    """Directory holding ffmpeg.exe/ffprobe.exe, or None.
+    Checked in order (first hit wins):
+      1. next to the running .exe (portable ZIP distribution)
+      2. inside the PyInstaller bundle (sys._MEIPASS)
+      3. next to app.py (source run)
+      4. system PATH (shutil.which)
+    Returns the DIRECTORY so yt-dlp finds both ffmpeg and ffprobe in it.
+    Also prepends it to PATH so any subprocess finds it too.
+    """
+    import shutil
+    candidates = []
     if getattr(sys, "frozen", False):
-        p = Path(sys._MEIPASS) / "ffmpeg.exe"
-        if p.exists():
-            return str(p)
-    p = BASE_DIR / "ffmpeg.exe"
-    if p.exists():
-        return str(p)
+        candidates.append(Path(sys.executable).resolve().parent)
+        candidates.append(Path(sys._MEIPASS))
+    candidates.append(BASE_DIR)
+    for d in candidates:
+        if (d / "ffmpeg.exe").exists() or (d / "ffmpeg").exists():
+            try:
+                os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
+            except Exception:
+                pass
+            return str(d)
+    if shutil.which("ffmpeg"):
+        return None  # on PATH already; yt-dlp will find it
     return None
+
+
+def _ffmpeg_location():
+    return _ffmpeg_dir()
 
 
 def _ydl_base_opts():
@@ -194,6 +214,13 @@ def _set_job(job_id, **kw):
         jobs.setdefault(job_id, {}).update(kw)
 
 
+@app.route("/api/health")
+def api_health():
+    ff = _ffmpeg_dir()
+    return jsonify({"ffmpeg": bool(ff) or bool(__import__("shutil").which("ffmpeg")),
+                    "ffmpeg_dir": ff})
+
+
 def _run_export(job_id, video_id, title, start, end, mode, precise):
     url = f"https://www.youtube.com/watch?v={video_id}"
     safe_title = safe_filename(title or video_id)
@@ -221,6 +248,14 @@ def _run_export(job_id, video_id, title, start, end, mode, precise):
         return opts
 
     _set_job(job_id, status="downloading", progress=0, message="Downloading...")
+    # Clip export needs ffmpeg (for the partial download). Fail fast with a
+    # clear message instead of a cryptic yt-dlp error.
+    import shutil
+    if mode == "clip" and not _ffmpeg_dir() and not shutil.which("ffmpeg"):
+        _set_job(job_id, status="error",
+                 error="ffmpeg not found. Put ffmpeg.exe (and ffprobe.exe) next to "
+                       "YT-Clip-Tool.exe and try again — they are in the portable ZIP.")
+        return
     try:
         try:
             with yt_dlp.YoutubeDL(build_opts(False)) as ydl:
@@ -300,6 +335,9 @@ def index():
 
 
 if __name__ == "__main__":
+    ff = _ffmpeg_dir()
+    import shutil
+    print(f"YT Clip Tool — ffmpeg: {ff or ('on PATH' if shutil.which('ffmpeg') else 'NOT FOUND')}")
     print("YT Clip Tool — open http://127.0.0.1:5000")
     # Portable .exe: open the browser automatically.
     if getattr(sys, "frozen", False):
