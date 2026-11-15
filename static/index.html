@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YT Clip Tool — search, transcript, export clips</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #0f0f0f; color: #f1f1f1; }
+  header { padding: 14px 20px; background: #161616; border-bottom: 1px solid #2a2a2a; position: sticky; top: 0; z-index: 10; }
+  header h1 { margin: 0 0 10px; font-size: 20px; }
+  header h1 span { color: #95ff50; }
+  .searchrow { display: flex; gap: 8px; }
+  .searchrow input { flex: 1; padding: 11px 14px; font-size: 15px; border-radius: 999px; border: 1px solid #3a3a3a; background: #1f1f1f; color: #fff; outline: none; }
+  .searchrow input:focus { border-color: #95ff50; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 11px 18px; font-size: 14px; font-weight: 600; background: #95ff50; color: #111; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: #2a2a2a; color: #eee; }
+  button.small { padding: 4px 9px; font-size: 12px; }
+  main { max-width: 1180px; margin: 0 auto; padding: 16px 20px 60px; }
+  .hint { color: #aaa; font-size: 13px; margin: 6px 0 0; }
+  #status { margin: 14px 0; color: #aaa; font-size: 14px; min-height: 20px; }
+  #status.err { color: #ff7a7a; }
+  /* results */
+  .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: #161616; border: 1px solid #262626; border-radius: 12px; overflow: hidden; cursor: pointer; }
+  .card:hover { border-color: #95ff50; }
+  .thumb { position: relative; aspect-ratio: 16/9; background: #000; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dur { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.85); padding: 2px 6px; border-radius: 5px; font-size: 12px; }
+  .card .meta { padding: 10px 12px; }
+  .card .t { font-size: 14px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .c { font-size: 12px; color: #aaa; margin-top: 5px; }
+  /* workspace */
+  .work { display: none; grid-template-columns: 1.5fr 1fr; gap: 18px; margin-top: 6px; }
+  .work.on { display: grid; }
+  @media (max-width: 900px) { .work { grid-template-columns: 1fr; } }
+  .panel { background: #161616; border: 1px solid #262626; border-radius: 12px; padding: 14px; }
+  .panel h2 { margin: 0 0 10px; font-size: 16px; }
+  .panel h3 { margin: 14px 0 8px; font-size: 14px; color: #ccc; }
+  #playerWrap { position: relative; aspect-ratio: 16/9; background: #000; border-radius: 10px; overflow: hidden; }
+  #playerWrap iframe { width: 100%; height: 100%; border: 0; }
+  .vidtitle { font-size: 15px; font-weight: 600; margin: 10px 0 2px; }
+  .vidchan { font-size: 13px; color: #aaa; }
+  #transcript { max-height: 430px; overflow-y: auto; border: 1px solid #262626; border-radius: 10px; background: #0f0f0f; }
+  .line { display: flex; gap: 10px; padding: 7px 10px; cursor: pointer; font-size: 14px; line-height: 1.45; align-items: baseline; }
+  .line:hover { background: #1e1e1e; }
+  .line .ts { color: #7fb7ff; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .line.active { background: #243318; }
+  .line.active .txt { color: #d8ffb0; }
+  .line.inrange { background: #1a2a12; }
+  .line .mark { margin-left: auto; display: flex; gap: 4px; }
+  .rangebox { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+  .rangebox input { width: 74px; padding: 8px 10px; border-radius: 8px; border: 1px solid #3a3a3a; background: #1f1f1f; color: #fff; font-size: 14px; }
+  .rangebox .pill { background: #243318; border: 1px solid #3d5a24; padding: 6px 10px; border-radius: 999px; font-size: 13px; }
+  .opts label { display: inline-flex; gap: 6px; align-items: center; margin-right: 16px; font-size: 14px; cursor: pointer; }
+  #prog { height: 8px; background: #262626; border-radius: 99px; overflow: hidden; margin-top: 10px; display: none; }
+  #prog > div { height: 100%; background: #95ff50; width: 0%; }
+  #dlLink { display: none; margin-top: 12px; }
+  #dlLink a { color: #95ff50; font-weight: 700; font-size: 15px; }
+  .back { margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>YT <span>Clip Tool</span></h1>
+  <div class="searchrow">
+    <input id="q" type="text" placeholder="Search YouTube by topic or creator — or paste a video link" autocomplete="off">
+    <button id="searchBtn">Search</button>
+  </div>
+  <p class="hint">Transcript loads instantly with timestamps. Click a line to jump. Set a start and end, then export the clip — or the full video — at 720p MP4.</p>
+</header>
+
+<main>
+  <div id="status"></div>
+  <button class="ghost back" id="backBtn" style="display:none">← Back to results</button>
+
+  <div class="results" id="results"></div>
+
+  <div class="work" id="work">
+    <div class="panel">
+      <div id="playerWrap"><div id="player"></div></div>
+      <div class="vidtitle" id="vidTitle"></div>
+      <div class="vidchan" id="vidChan"></div>
+
+      <h3>Clip range</h3>
+      <div class="rangebox">
+        <label>Start (s) <input id="startInput" type="number" min="0" step="0.1" value="0"></label>
+        <label>End (s) <input id="endInput" type="number" min="0" step="0.1" value="0"></label>
+        <span class="pill" id="rangeLabel">—</span>
+        <button class="ghost small" id="clearRange">Clear</button>
+      </div>
+
+      <h3>Export</h3>
+      <div class="opts">
+        <label><input type="radio" name="mode" value="clip" checked> Clip (start → end)</label>
+        <label><input type="radio" name="mode" value="full"> Full video</label>
+        <label><input type="checkbox" id="precise"> Precise cut (slower, re-encodes)</label>
+      </div>
+      <p class="hint">720p MP4. Fast mode cuts at the nearest keyframe (instant). Precise mode re-encodes for frame-accurate cuts.</p>
+      <div style="margin-top:12px; display:flex; gap:8px;">
+        <button id="exportBtn">Export MP4</button>
+      </div>
+      <div id="prog"><div></div></div>
+      <div id="dlLink"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Transcript <span id="trLang" style="color:#aaa; font-size:12px; font-weight:400;"></span></h2>
+      <div class="hint" style="margin:0 0 10px;">Click a line to jump there. Use S / E on a line to set it as start / end.</div>
+      <div id="transcript"></div>
+    </div>
+  </div>
+</main>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+const $ = s => document.querySelector(s);
+let player = null, playerReady = false, currentVideo = null, segments = [], syncTimer = null;
+let startSec = 0, endSec = 0;
+
+function fmt(s) {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+           : `${m}:${String(sec).padStart(2,'0')}`;
+}
+function setStatus(msg, isErr) {
+  const el = $('#status');
+  el.textContent = msg || '';
+  el.classList.toggle('err', !!isErr);
+}
+
+async function doSearch() {
+  const q = $('#q').value.trim();
+  if (!q) return;
+  setStatus('Searching...');
+  $('#results').innerHTML = '';
+  try {
+    const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Search failed');
+    if (!d.results.length) { setStatus('No results.', true); return; }
+    setStatus(`${d.results.length} results — click a video to open it.`);
+    const box = $('#results');
+    d.results.forEach(v => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `<div class="thumb"><img src="${v.thumbnail}" alt="" loading="lazy"><span class="dur">${fmt(v.duration)}</span></div>
+        <div class="meta"><div class="t">${escapeHtml(v.title)}</div><div class="c">${escapeHtml(v.uploader || '')}</div></div>`;
+      card.onclick = () => openVideo(v);
+      box.appendChild(card);
+    });
+  } catch (e) { setStatus('Search failed: ' + e.message, true); }
+}
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function onYouTubeIframeAPIReady() { playerReady = true; if (currentVideo) loadPlayer(); }
+function loadPlayer() {
+  if (player) { player.loadVideoById(currentVideo.id); return; }
+  if (!playerReady) return;
+  player = new YT.Player('player', {
+    videoId: currentVideo.id,
+    playerVars: { rel: 0, modestbranding: 1 },
+    events: { onReady: () => { playerReady = true; } }
+  });
+}
+
+async function openVideo(v) {
+  currentVideo = v;
+  segments = []; startSec = 0; endSec = 0;
+  $('#startInput').value = 0; $('#endInput').value = 0; updateRangeLabel();
+  $('#results').style.display = 'none';
+  $('#work').classList.add('on');
+  $('#backBtn').style.display = '';
+  $('#vidTitle').textContent = v.title;
+  $('#vidChan').textContent = v.uploader || '';
+  $('#transcript').innerHTML = '<div class="line"><span class="txt" style="color:#aaa">Loading transcript…</span></div>';
+  $('#dlLink').style.display = 'none'; $('#prog').style.display = 'none';
+  loadPlayer();
+  try {
+    const r = await fetch('/api/transcript?video_id=' + encodeURIComponent(v.id));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No transcript');
+    segments = d.segments || [];
+    $('#trLang').textContent = `(${d.language}${d.is_generated ? ', auto-generated' : ''})`;
+    renderTranscript();
+    setStatus(`Transcript ready — ${segments.length} lines, ${d.language}.`);
+    if (endSec === 0) { $('#endInput').value = Math.min(v.duration || 0, 30); endSec = Math.min(v.duration || 0, 30); updateRangeLabel(); }
+    startSync();
+  } catch (e) {
+    $('#transcript').innerHTML = '<div class="line"><span class="txt" style="color:#ff7a7a">No transcript for this video.</span></div>';
+    setStatus('No transcript for this video: ' + e.message, true);
+  }
+}
+
+function renderTranscript() {
+  const box = $('#transcript');
+  box.innerHTML = '';
+  segments.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'line';
+    div.dataset.i = i;
+    div.innerHTML = `<span class="ts">${fmt(s.start)}</span><span class="txt">${escapeHtml(s.text)}</span>
+      <span class="mark"><button class="ghost small" data-s="${s.start}">S</button><button class="ghost small" data-e="${s.start + s.duration}">E</button></span>`;
+    div.onclick = (e) => {
+      if (e.target.tagName === 'BUTTON') return;
+      seekTo(s.start);
+    };
+    div.querySelector('[data-s]').onclick = (e) => { e.stopPropagation(); setStart(parseFloat(e.target.dataset.s)); };
+    div.querySelector('[data-e]').onclick = (e) => { e.stopPropagation(); setEnd(parseFloat(e.target.dataset.e)); };
+    box.appendChild(div);
+  });
+  paintRange();
+}
+function seekTo(t) { if (player && player.seekTo) player.seekTo(t, true); }
+function setStart(t) { startSec = Math.max(0, t); $('#startInput').value = startSec.toFixed(1); updateRangeLabel(); paintRange(); }
+function setEnd(t) { endSec = Math.max(0, t); $('#endInput').value = endSec.toFixed(1); updateRangeLabel(); paintRange(); }
+function updateRangeLabel() {
+  const dur = endSec > startSec ? (endSec - startSec) : 0;
+  $('#rangeLabel').textContent = dur ? `Clip: ${fmt(startSec)} → ${fmt(endSec)} (${dur.toFixed(1)}s)` : 'Set a start and end';
+}
+function paintRange() {
+  document.querySelectorAll('#transcript .line').forEach(el => {
+    const s = segments[+el.dataset.i];
+    el.classList.toggle('inrange', !!s && startSec <= s.start && s.start < endSec && endSec > startSec);
+  });
+}
+
+function startSync() {
+  stopSync();
+  syncTimer = setInterval(() => {
+    if (!player || !player.getCurrentTime) return;
+    let t;
+    try { t = player.getCurrentTime(); } catch (e) { return; }
+    let idx = -1;
+    for (let i = 0; i < segments.length; i++) {
+      if (segments[i].start <= t) idx = i; else break;
+    }
+    document.querySelectorAll('#transcript .line.active').forEach(el => el.classList.remove('active'));
+    if (idx >= 0) {
+      const el = document.querySelector(`#transcript .line[data-i="${idx}"]`);
+      if (el) {
+        el.classList.add('active');
+        const box = $('#transcript');
+        const top = el.offsetTop - box.offsetTop;
+        if (top < box.scrollTop || top > box.scrollTop + box.clientHeight - 60) {
+          box.scrollTop = top - 40;
+        }
+      }
+    }
+  }, 300);
+}
+function stopSync() { if (syncTimer) { clearInterval(syncTimer); syncTimer = null; } }
+
+async function doExport() {
+  if (!currentVideo) return;
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  const precise = $('#precise').checked;
+  if (mode === 'clip' && !(endSec > startSec)) { setStatus('Set a start and end first (or pick Full video).', true); return; }
+  const btn = $('#exportBtn');
+  btn.disabled = true;
+  $('#dlLink').style.display = 'none';
+  $('#prog').style.display = 'block';
+  $('#prog > div').style.width = '0%';
+  setStatus(mode === 'clip' ? `Exporting clip ${fmt(startSec)} → ${fmt(endSec)}…` : 'Exporting full video…');
+  try {
+    const r = await fetch('/api/export', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_id: currentVideo.id, title: currentVideo.title, start: startSec, end: endSec, mode, precise })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Export failed');
+    const jobId = d.job_id;
+    const poll = setInterval(async () => {
+      try {
+        const s = await (await fetch('/api/export/status/' + jobId)).json();
+        $('#prog > div').style.width = (s.progress || 0) + '%';
+        if (s.status === 'done') {
+          clearInterval(poll); btn.disabled = false;
+          setStatus(`Done — ${(s.size / 1048576).toFixed(1)} MB.`);
+          const dl = $('#dlLink');
+          dl.innerHTML = `<a href="/api/download/${jobId}" download>⬇ Download ${escapeHtml(s.filename)}</a>`;
+          dl.style.display = 'block';
+        } else if (s.status === 'error') {
+          clearInterval(poll); btn.disabled = false;
+          setStatus('Export failed: ' + (s.error || 'unknown error'), true);
+        } else {
+          setStatus((s.message || 'Working…') + ` ${Math.round(s.progress || 0)}%`);
+        }
+      } catch (e) { clearInterval(poll); btn.disabled = false; setStatus('Status check failed: ' + e.message, true); }
+    }, 1000);
+  } catch (e) { btn.disabled = false; setStatus('Export failed: ' + e.message, true); }
+}
+
+$('#searchBtn').onclick = doSearch;
+$('#q').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+$('#exportBtn').onclick = doExport;
+$('#startInput').onchange = e => setStart(parseFloat(e.target.value) || 0);
+$('#endInput').onchange = e => setEnd(parseFloat(e.target.value) || 0);
+$('#clearRange').onclick = () => { startSec = 0; endSec = 0; $('#startInput').value = 0; $('#endInput').value = 0; updateRangeLabel(); paintRange(); };
+$('#backBtn').onclick = () => {
+  stopSync();
+  $('#work').classList.remove('on');
+  $('#results').style.display = '';
+  $('#backBtn').style.display = 'none';
+  if (player && player.stopVideo) player.stopVideo();
+  currentVideo = null;
+  setStatus('');
+};
+updateRangeLabel();
+</script>
+</body>
+</html>

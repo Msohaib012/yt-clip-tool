@@ -1,0 +1,57 @@
+name: Build Windows .exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Download ffmpeg (Windows)
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_dl
+          Get-ChildItem ffmpeg_dl -Recurse -Filter ffmpeg.exe | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName -Destination .\ffmpeg.exe }
+          .\ffmpeg.exe -version | Select-Object -First 1
+
+      - name: Build .exe with PyInstaller
+        run: |
+          pyinstaller --onefile --clean --noconfirm --name YT-Clip-Tool --console --add-data "static;static" --add-binary "ffmpeg.exe;." --collect-all yt_dlp --collect-all youtube_transcript_api app.py
+          dir dist
+
+      - name: Upload .exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YT-Clip-Tool-Windows
+          path: dist/YT-Clip-Tool.exe
+
+      - name: Publish GitHub Release (v1.0.0)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: YT Clip Tool v1.0.0 (Windows)
+          body: |
+            Portable Windows .exe — double-click, no Python or ffmpeg install needed.
+            The browser opens at http://127.0.0.1:5000 automatically.
+            Search YouTube, read the transcript with timestamps, export a clip
+            (start → end) or the full video at 720p MP4.
+          files: dist/YT-Clip-Tool.exe
