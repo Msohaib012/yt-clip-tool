@@ -32,8 +32,8 @@ jobs:
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_dl
           Get-ChildItem ffmpeg_dl -Recurse -Filter ffmpeg.exe | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName -Destination .\ffmpeg.exe }
           Get-ChildItem ffmpeg_dl -Recurse -Filter ffprobe.exe | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName -Destination .\ffprobe.exe }
-          .\ffmpeg.exe -version | Select-Object -First 1
-          .\ffprobe.exe -version | Select-Object -First 1
+          .\ffmpeg.exe -version
+          .\ffprobe.exe -version
 
       - name: Build .exe with PyInstaller
         run: |
