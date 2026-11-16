@@ -234,6 +234,14 @@
   .line.inrange { background: rgba(163, 230, 53, .06); }
   .line .mark { display: flex; gap: 5px; opacity: 0; transition: opacity .18s; }
   .line:hover .mark, .line.active .mark { opacity: 1; }
+  .trsearch { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; }
+  .trsearch input { flex: 1; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font-size: 13.5px; font-family: inherit; outline: none; transition: border-color .2s, box-shadow .2s; }
+  .trsearch input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(163, 230, 53, .14); }
+  .trsearch .count { font-size: 12.5px; color: var(--muted); white-space: nowrap; min-width: 56px; text-align: center; }
+  .trsearch button.nav { padding: 7px 11px; font-size: 13px; }
+  .line .txt mark { background: rgba(163, 230, 53, .35); color: #e7f9c8; border-radius: 3px; padding: 0 1px; }
+  .line.search-current { background: rgba(163, 230, 53, .16); border-left-color: var(--accent); }
+  .line.search-current .txt mark { background: var(--accent); color: #111; }
   .back { margin-bottom: 14px; }
   .empty { padding: 34px 20px; text-align: center; color: var(--faint); font-size: 14px; line-height: 1.7; }
   #followBtn {
@@ -348,6 +356,12 @@
         </div>
       </div>
       <p class="sub">Click a line to jump there. Scroll freely — auto-follow pauses while you scroll. Use <b>S</b> / <b>E</b> on a line to set it as start / end.</p>
+      <div class="trsearch">
+        <input id="trSearch" type="text" placeholder="Search words in this transcript…" autocomplete="off">
+        <span class="count" id="trSearchCount"></span>
+        <button class="btn-chip nav" id="trPrev" title="Previous match">↑</button>
+        <button class="btn-chip nav" id="trNext" title="Next match">↓</button>
+      </div>
       <div class="trwrap">
         <div id="transcript" tabindex="0"></div>
         <button id="followBtn">&darr; Follow current line</button>
@@ -516,6 +530,8 @@ async function openVideo(v) {
   $('#vidTitle').textContent = v.title;
   $('#vidChan').textContent = v.uploader || '';
   $('#transcript').innerHTML = '<div class="empty">Loading transcript…</div>';
+  $('#trSearch').value = ''; $('#trSearchCount').textContent = '';
+  searchQuery = ''; searchMatches = []; searchIdx = -1;
   $('#dlLink').style.display = 'none'; $('#prog').style.display = 'none';
   loadPlayer();
   setLang('original');
@@ -597,6 +613,7 @@ function renderTranscript() {
     box.appendChild(div);
   });
   paintRange();
+  if ($('#trSearch').value.trim()) runTranscriptSearch($('#trSearch').value);
 }
 /* Manual scrolling turns auto-follow OFF — auto-scroll never fights you.
    Clicking a line or the Follow button turns it back ON. */
@@ -617,6 +634,53 @@ trBox.addEventListener('keydown', e => {
   if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(e.key) && followMode) setFollow(false);
 });
 $('#followBtn').onclick = () => setFollow(true);
+
+/* ---------------- transcript search ---------------- */
+let searchQuery = '', searchMatches = [], searchIdx = -1;
+function clearSearchMarks() {
+  document.querySelectorAll('#transcript .line').forEach(el => {
+    const s = segments[+el.dataset.i];
+    if (!s) return;
+    el.querySelector('.txt').innerHTML = escapeHtml(s.text);
+    el.classList.remove('search-current');
+  });
+}
+function runTranscriptSearch(q) {
+  searchQuery = (q || '').trim();
+  clearSearchMarks();
+  searchMatches = []; searchIdx = -1;
+  const countEl = $('#trSearchCount');
+  if (!searchQuery) { countEl.textContent = ''; return; }
+  const needle = searchQuery.toLowerCase();
+  const esc = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(esc, 'gi');
+  segments.forEach((s, i) => {
+    if (!s.text.toLowerCase().includes(needle)) return;
+    searchMatches.push(i);
+    const txtEl = document.querySelector(`#transcript .line[data-i="${i}"] .txt`);
+    if (txtEl) txtEl.innerHTML = escapeHtml(s.text).replace(re, m => `<mark>${m}</mark>`);
+  });
+  countEl.textContent = searchMatches.length ? `${searchMatches.length} found` : 'No match';
+  if (searchMatches.length) jumpToMatch(0);
+}
+function jumpToMatch(i) {
+  if (!searchMatches.length) return;
+  searchIdx = ((i % searchMatches.length) + searchMatches.length) % searchMatches.length;
+  document.querySelectorAll('#transcript .line.search-current').forEach(el => el.classList.remove('search-current'));
+  const segIdx = searchMatches[searchIdx];
+  const el = document.querySelector(`#transcript .line[data-i="${segIdx}"]`);
+  if (!el) return;
+  el.classList.add('search-current');
+  const box = $('#transcript');
+  setScrollTop(el.offsetTop - box.offsetTop - 40);
+  $('#trSearchCount').textContent = `${searchIdx + 1} / ${searchMatches.length}`;
+}
+$('#trSearch').addEventListener('input', e => runTranscriptSearch(e.target.value));
+$('#trSearch').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); jumpToMatch(searchIdx + 1); }
+});
+$('#trNext').onclick = () => jumpToMatch(searchIdx + 1);
+$('#trPrev').onclick = () => jumpToMatch(searchIdx - 1);
 
 function seekTo(t) { if (player && player.seekTo) player.seekTo(t, true); }
 function setStart(t) { startSec = Math.max(0, t); $('#startInput').value = startSec.toFixed(1); updateRangeLabel(); paintRange(); }

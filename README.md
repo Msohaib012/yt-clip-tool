@@ -16,8 +16,10 @@ https://github.com/Msohaib012/yt-clip-tool/releases
 - **Transcript** — loads instantly, one complete sentence per line, each with a
   timestamp. Click a line to jump the video there; the current line highlights
   and auto-scrolls as the video plays — scroll yourself and auto-follow pauses
-  (a "Follow current line" button brings it back). Switch language: Original,
-  English, Hindi, Urdu or Roman Urdu. Copy the transcript or download it as .txt.
+  (a "Follow current line" button brings it back). **Search words in the
+  transcript** — matches highlight and ↑/↓ jumps straight to each matching line.
+  Switch language: Original, English, Hindi, Urdu or Roman Urdu. Copy the
+  transcript or download it as .txt.
 - **Clip** — press **S** on a line to set it as start, **E** to set it as end
   (or type the seconds). The range is highlighted in the transcript.
 - **Export** — Clip (start → end) or Full video, 720p MP4. Fast mode cuts at
