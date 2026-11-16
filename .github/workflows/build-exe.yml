@@ -62,11 +62,11 @@ jobs:
           name: YT-Clip-Tool-Portable
           path: YT-Clip-Tool-Portable.zip
 
-      - name: Publish GitHub Release (v1.0.1)
+      - name: Publish GitHub Release (v1.1.0)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.1
-          name: YT Clip Tool v1.0.1 (Windows)
+          tag_name: v1.1.0
+          name: YT Clip Tool v1.1.0 (Windows)
           body: |
             Portable Windows build — double-click, no Python install needed.
             **Recommended: YT-Clip-Tool-Portable.zip** — extract it anywhere and
@@ -75,6 +75,13 @@ jobs:
             The browser opens at http://127.0.0.1:5000 automatically.
             Search YouTube, read the transcript with timestamps, export a clip
             (start → end) or the full video at 720p MP4.
+            **v1.1.0 — what's new:** YouTube-like search suggestions as you type;
+            transcript language switcher (Original / English / Hindi / Urdu / Roman Urdu —
+            Roman Urdu needs your Gemini API key in Settings); transcript lines are now
+            one complete sentence each (min 10s); manual transcript scrolling no longer
+            fights auto-follow (Follow button); clips save to your Downloads folder;
+            Copy transcript / Download .txt / Recent exports; "Precise cut (frame-accurate)"
+            explained in plain words.
           files: |
             dist/YT-Clip-Tool.exe
             YT-Clip-Tool-Portable.zip
