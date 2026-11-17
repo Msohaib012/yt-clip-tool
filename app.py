@@ -1,5 +1,5 @@
 """
-YT Clip Tool v1.1.0 — backend.
+YT Clip Tool v1.2.0 — backend.
 Search YouTube, fetch transcripts (instant, with timestamps),
 export a clip (start-end) or the full video at 720p MP4.
 
@@ -7,6 +7,12 @@ Run:  python app.py   (then open http://127.0.0.1:5000)
 As a portable .exe (PyInstaller): double-click, the browser opens itself.
 Requires: flask, yt-dlp, youtube-transcript-api, ffmpeg on PATH
 (or a bundled ffmpeg.exe next to the exe / inside the bundle).
+
+v1.2.0:
+- Quality picker (360/480/720/1080/Best) + Audio-only MP3 export
+- Cancel export, live speed/ETA, open file / open folder from the app
+- Settings saved on disk (download folder, default quality) in config.json
+- Auto-picks a free port if 5000 is busy
 
 v1.1.0:
 - Search suggestions: /api/suggest (Google Suggest proxy, no key)
@@ -71,7 +77,38 @@ def _default_download_dir():
     return BASE_DIR / "downloads"
 
 
-DOWNLOAD_DIR = _default_download_dir()
+CONFIG_PATH = _writable_base() / "config.json"
+APP_VERSION = "1.2.0"
+
+
+def _load_config():
+    try:
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_config(cfg):
+    try:
+        CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_download_dir():
+    custom = (_load_config().get("download_dir") or "").strip()
+    if custom:
+        try:
+            p = Path(custom).expanduser()
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except Exception:
+            pass
+    return _default_download_dir()
+
+
+DOWNLOAD_DIR = _resolve_download_dir()
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 TRANSCRIPTS_DIR = _writable_base() / "transcripts"
 TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -81,6 +118,26 @@ app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
 # 720p MP4: H.264 video (format 136) + m4a audio (format 140).
 FORMAT_720P = "136+140"
 FORMAT_FALLBACK = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]"
+QUALITIES = ("360", "480", "720", "1080", "best", "audio")
+
+
+def _format_for(quality):
+    """yt-dlp format selector for a quality choice. MP4 + H.264 preferred
+    (v1.1.0 pinned format 136 for the same reason: AV1 also ships in MP4
+    containers, and AV1 is heavier to edit in DaVinci Resolve)."""
+    if quality == "audio":
+        return "bestaudio[ext=m4a]/bestaudio/best"
+    if quality == "best":
+        return ("bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
+                "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best")
+    h = int(quality)
+    return (f"bestvideo[height<={h}][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={h}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best")
+
+
+class _Cancelled(Exception):
+    """Raised inside a progress hook to abort a running export."""
 
 # jobs: job_id -> {status, progress, message, filename, error}
 jobs = {}
@@ -227,6 +284,7 @@ def api_search():
                 "title": info.get("title") or vid,
                 "uploader": info.get("uploader") or "",
                 "duration": int(info.get("duration") or 0),
+                "views": info.get("view_count"),
                 "thumbnail": info.get("thumbnail") or
                 f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
             }]})
@@ -248,6 +306,7 @@ def api_search():
                 "title": e.get("title") or vid,
                 "uploader": e.get("uploader") or "",
                 "duration": int(e.get("duration") or 0),
+                "views": e.get("view_count"),
                 "thumbnail": e.get("thumbnail") or
                 f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
             })
@@ -681,57 +740,143 @@ def api_health():
         "ffmpeg_dir": ff,
         "download_dir": str(DOWNLOAD_DIR),
         "gemini_key_set": bool(os.environ.get("GEMINI_API_KEY")),
-        "version": "1.1.0",
+        "version": APP_VERSION,
     })
+
+
+@app.route("/api/config", methods=["GET", "POST"])
+def api_config():
+    global DOWNLOAD_DIR
+    cfg = _load_config()
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        if "download_dir" in data:
+            raw = (data.get("download_dir") or "").strip()
+            if raw:
+                try:
+                    p = Path(raw).expanduser()
+                    p.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    return jsonify({"error": "bad folder", "detail": str(e)[:200]}), 400
+                cfg["download_dir"] = str(p)
+            else:
+                cfg.pop("download_dir", None)
+        if data.get("default_quality") in QUALITIES:
+            cfg["default_quality"] = data["default_quality"]
+        _save_config(cfg)
+        DOWNLOAD_DIR = _resolve_download_dir()
+    return jsonify({"download_dir": str(DOWNLOAD_DIR),
+                    "default_quality": cfg.get("default_quality", "720")})
+
+
+def _open_path(path, select=False):
+    """Open a file/folder with the OS (Explorer on Windows)."""
+    import subprocess
+    try:
+        if sys.platform.startswith("win"):
+            if select and Path(path).is_file():
+                subprocess.Popen(["explorer", "/select,", str(path)])
+            else:
+                os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(path)] if select else ["open", str(path)])
+        else:
+            target = Path(path).parent if Path(path).is_file() else path
+            subprocess.Popen(["xdg-open", str(target)])
+        return True
+    except Exception:
+        return False
+
+
+@app.route("/api/open", methods=["POST"])
+def api_open():
+    data = request.get_json(force=True, silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if name:
+        target = (DOWNLOAD_DIR / Path(name).name)
+        if not target.exists():
+            return jsonify({"error": "file not found"}), 404
+        ok = _open_path(target, select=bool(data.get("reveal", True)))
+    else:
+        ok = _open_path(DOWNLOAD_DIR)
+    return jsonify({"ok": ok})
 
 
 @app.route("/api/recent")
 def api_recent():
     files = []
     try:
-        for p in DOWNLOAD_DIR.glob("*.mp4"):
-            try:
-                st = p.stat()
-            except OSError:
-                continue
-            files.append({"name": p.name, "size": st.st_size,
-                          "mtime": st.st_mtime})
+        for pat in ("*.mp4", "*.mp3", "*.m4a"):
+            for p in DOWNLOAD_DIR.glob(pat):
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                files.append({"name": p.name, "size": st.st_size,
+                              "mtime": st.st_mtime})
     except Exception:
         pass
     files.sort(key=lambda f: f["mtime"], reverse=True)
-    return jsonify({"download_dir": str(DOWNLOAD_DIR), "files": files[:5]})
+    return jsonify({"download_dir": str(DOWNLOAD_DIR), "files": files[:8]})
 
 
-def _run_export(job_id, video_id, title, start, end, mode, precise):
+def _run_export(job_id, video_id, title, start, end, mode, precise, quality):
     url = f"https://www.youtube.com/watch?v={video_id}"
     safe_title = safe_filename(title or video_id)
-    suffix = f"_{int(start)}-{int(end)}s" if mode == "clip" else "_full"
+    audio = quality == "audio"
+    tag = {"audio": "audio", "best": "best"}.get(quality, quality + "p")
+    suffix = (f"_{int(start)}-{int(end)}s" if mode == "clip" else "_full") + f"_{tag}"
     outtmpl = str(DOWNLOAD_DIR / f"{safe_title}{suffix}.%(ext)s")
 
+    def is_cancelled():
+        with jobs_lock:
+            return bool(jobs.get(job_id, {}).get("cancel"))
+
     def progress_hook(d):
+        if is_cancelled():
+            raise _Cancelled()
         if d.get("status") == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             done = d.get("downloaded_bytes") or 0
+            upd = {}
             if total:
-                _set_job(job_id, progress=round(done / total * 100, 1))
+                upd["progress"] = round(min(done / total * 100, 99.0), 1)
+            if d.get("speed"):
+                upd["speed"] = int(d["speed"])
+            if d.get("eta") is not None:
+                upd["eta"] = int(d["eta"])
+            if upd:
+                _set_job(job_id, **upd)
 
-    def build_opts(nocheck=False, fmt=FORMAT_720P):
+    def pp_hook(d):
+        if is_cancelled():
+            raise _Cancelled()
+        if d.get("status") == "started":
+            _set_job(job_id, message="Processing…", progress=99.0)
+
+    def build_opts(nocheck=False, fmt=None):
         opts = {**_ydl_base_opts(), "quiet": False, "noprogress": True,
-                "format": fmt, "outtmpl": outtmpl,
+                "format": fmt or _format_for(quality), "outtmpl": outtmpl,
                 "nocheckcertificate": nocheck,
-                "progress_hooks": [progress_hook]}
+                "progress_hooks": [progress_hook],
+                "postprocessor_hooks": [pp_hook]}
+        if audio:
+            opts["postprocessors"] = [{"key": "FFmpegExtractAudio",
+                                       "preferredcodec": "mp3",
+                                       "preferredquality": "192"}]
+        else:
+            opts["merge_output_format"] = "mp4"
         if mode == "clip":
             opts["download_ranges"] = (
                 lambda info, ydl: [{"start_time": float(start),
                                      "end_time": float(end)}])
-            if precise:
+            if precise and not audio:
                 opts["force_keyframes_at_cuts"] = True
         return opts
 
-    _set_job(job_id, status="downloading", progress=0, message="Downloading...")
-    # Clip export needs ffmpeg (for the partial download). Fail fast with a
-    # clear message instead of a cryptic yt-dlp error.
-    if mode == "clip" and not _ffmpeg_dir() and not shutil.which("ffmpeg"):
+    _set_job(job_id, status="downloading", progress=0, message="Downloading…")
+    # Clip / audio export needs ffmpeg. Fail fast with a clear message.
+    if (mode == "clip" or audio) and not _ffmpeg_dir() and not shutil.which("ffmpeg"):
         _set_job(job_id, status="error",
                  error="ffmpeg not found. Put ffmpeg.exe (and ffprobe.exe) next to "
                        "YT-Clip-Tool.exe and try again — they are in the portable ZIP.")
@@ -740,23 +885,38 @@ def _run_export(job_id, video_id, title, start, end, mode, precise):
         try:
             with yt_dlp.YoutubeDL(build_opts(False)) as ydl:
                 ydl.download([url])
+        except _Cancelled:
+            raise
         except Exception as e:
             if _is_ssl_error(e):
-                _set_job(job_id, message="Retrying download...")
+                _set_job(job_id, message="Retrying download…")
                 with yt_dlp.YoutubeDL(build_opts(True)) as ydl:
                     ydl.download([url])
-            elif "requested format" in str(e).lower() or "format" in str(e).lower():
+            elif "requested format" in str(e).lower() and not audio:
                 with yt_dlp.YoutubeDL(build_opts(False, FORMAT_FALLBACK)) as ydl:
                     ydl.download([url])
             else:
                 raise
+    except _Cancelled:
+        for junk in DOWNLOAD_DIR.glob(f"{safe_title}{suffix}.*"):
+            if junk.suffix in (".part", ".ytdl", ".temp") or ".part" in junk.name:
+                try:
+                    junk.unlink()
+                except OSError:
+                    pass
+        _set_job(job_id, status="cancelled", message="Cancelled.")
+        return
     except Exception as e:
+        if is_cancelled():
+            _set_job(job_id, status="cancelled", message="Cancelled.")
+            return
         _set_job(job_id, status="error",
                  error="Download failed. " + str(e)[-300:])
         return
 
     produced = sorted(DOWNLOAD_DIR.glob(f"{safe_title}{suffix}.*"),
                       key=lambda p: p.stat().st_mtime, reverse=True)
+    produced = [p for p in produced if p.suffix.lower() in (".mp4", ".mp3", ".m4a", ".mkv", ".webm")]
     if not produced:
         _set_job(job_id, status="error", error="Export finished but no file found.")
         return
@@ -781,14 +941,27 @@ def api_export():
     if mode == "clip" and (end <= start):
         return jsonify({"error": "end must be after start"}), 400
     precise = bool(data.get("precise"))
+    quality = str(data.get("quality") or _load_config().get("default_quality") or "720")
+    if quality not in QUALITIES:
+        quality = "720"
     job_id = uuid.uuid4().hex[:12]
-    _set_job(job_id, status="queued", progress=0, message="Starting...",
-             video_id=video_id, mode=mode)
+    _set_job(job_id, status="queued", progress=0, message="Starting…",
+             video_id=video_id, mode=mode, quality=quality)
     t = threading.Thread(target=_run_export,
-                         args=(job_id, video_id, title, start, end, mode, precise),
+                         args=(job_id, video_id, title, start, end, mode, precise, quality),
                          daemon=True)
     t.start()
     return jsonify({"job_id": job_id})
+
+
+@app.route("/api/export/cancel/<job_id>", methods=["POST"])
+def api_export_cancel(job_id):
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "unknown job"}), 404
+        job["cancel"] = True
+    return jsonify({"ok": True})
 
 
 @app.route("/api/export/status/<job_id>")
@@ -814,12 +987,25 @@ def index():
     return send_from_directory(str(STATIC_DIR), "index.html")
 
 
+def _free_port(preferred=5000, tries=20):
+    import socket
+    for port in range(preferred, preferred + tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
+            try:
+                sk.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    return preferred
+
+
 if __name__ == "__main__":
     ff = _ffmpeg_dir()
-    print(f"YT Clip Tool v1.1.0 — ffmpeg: {ff or ('on PATH' if shutil.which('ffmpeg') else 'NOT FOUND')}")
-    print(f"YT Clip Tool v1.1.0 — downloads go to: {DOWNLOAD_DIR}")
-    print("YT Clip Tool — open http://127.0.0.1:5000")
-    # Portable .exe: open the browser automatically.
+    port = _free_port(5000)
+    print(f"YT Clip Tool v{APP_VERSION}")
+    print(f"  ffmpeg    : {ff or ('on PATH' if shutil.which('ffmpeg') else 'NOT FOUND')}")
+    print(f"  downloads : {DOWNLOAD_DIR}")
+    print(f"  open      : http://127.0.0.1:{port}   (close this window to quit)")
     if getattr(sys, "frozen", False):
-        threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
-    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+        threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
+    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)

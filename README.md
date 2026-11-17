@@ -10,7 +10,17 @@ at http://127.0.0.1:5000 automatically.
 
 https://github.com/Msohaib012/yt-clip-tool/releases
 
-## What it does (v1.1.0)
+## What's new in v1.2.0
+- **New interface** — clean, minimal, premium dark design (plus a light theme).
+- **Precision clip editor** — drag the start/end handles on the timeline, press
+  **I** / **O** to mark in/out at the current time, ±1s steppers, **Preview clip**.
+- **Quality picker** — 360p / 480p / 720p / 1080p / Best, or **audio-only MP3**.
+- **Export control** — live speed + ETA, **Cancel**, *Show in folder*, *Open folder*.
+- **Settings** — choose your download folder and default quality (saved in `config.json`).
+- Keyboard: `/` search · `I` start · `O` end · `Space` play/pause · `←` `→` seek 5s.
+- Auto-picks a free port if 5000 is busy.
+
+## What it does (v1.1.0 base)
 - **Search** — YouTube-style results (topic, creator, or paste a video link),
   with YouTube-like autocomplete suggestions as you type.
 - **Transcript** — loads instantly, one complete sentence per line, each with a

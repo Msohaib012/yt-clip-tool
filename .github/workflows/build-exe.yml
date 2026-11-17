@@ -37,7 +37,7 @@ jobs:
 
       - name: Build .exe with PyInstaller
         run: |
-          pyinstaller --onefile --clean --noconfirm --name YT-Clip-Tool --console --add-data "static;static" --add-binary "ffmpeg.exe;." --add-binary "ffprobe.exe;." --collect-all yt_dlp --collect-all youtube_transcript_api app.py
+          pyinstaller --onefile --clean --noconfirm --name YT-Clip-Tool --console --icon icon.ico --add-data "static;static" --add-binary "ffmpeg.exe;." --add-binary "ffprobe.exe;." --collect-all yt_dlp --collect-all youtube_transcript_api app.py
           dir dist
 
       - name: Make portable ZIP (.exe + ffmpeg + ffprobe)
@@ -62,11 +62,11 @@ jobs:
           name: YT-Clip-Tool-Portable
           path: YT-Clip-Tool-Portable.zip
 
-      - name: Publish GitHub Release (v1.1.0)
+      - name: Publish GitHub Release (v1.2.0)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.0
-          name: YT Clip Tool v1.1.0 (Windows)
+          tag_name: v1.2.0
+          name: YT Clip Tool v1.2.0 (Windows)
           body: |
             Portable Windows build — double-click, no Python install needed.
             **Recommended: YT-Clip-Tool-Portable.zip** — extract it anywhere and
@@ -75,13 +75,11 @@ jobs:
             The browser opens at http://127.0.0.1:5000 automatically.
             Search YouTube, read the transcript with timestamps, export a clip
             (start → end) or the full video at 720p MP4.
-            **v1.1.0 — what's new:** YouTube-like search suggestions as you type;
-            transcript language switcher (Original / English / Hindi / Urdu / Roman Urdu —
-            Roman Urdu needs your Gemini API key in Settings); transcript lines are now
-            one complete sentence each (min 10s); manual transcript scrolling no longer
-            fights auto-follow (Follow button); clips save to your Downloads folder;
-            Copy transcript / Download .txt / Recent exports; "Precise cut (frame-accurate)"
-            explained in plain words.
+            **v1.2.0 — what's new:** completely redesigned interface (dark + light theme);
+            drag-handle clip timeline with I / O shortcuts and clip preview;
+            quality picker 360p / 480p / 720p / 1080p / Best, plus audio-only MP3;
+            cancel exports, live speed + ETA, open file / open folder from the app;
+            settings for download folder and default quality; picks a free port automatically.
           files: |
             dist/YT-Clip-Tool.exe
             YT-Clip-Tool-Portable.zip
