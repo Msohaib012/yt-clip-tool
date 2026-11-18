@@ -78,7 +78,7 @@ def _default_download_dir():
 
 
 CONFIG_PATH = _writable_base() / "config.json"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 
 
 def _load_config():
@@ -202,10 +202,15 @@ def _is_ssl_error(exc) -> bool:
 
 def _is_retryable_http(exc) -> bool:
     """Transient server-side failures worth retrying: rate limit (429)
-    and temporary unavailability (500/502/503). YouTube and Gemini both
-    return these in waves; a single 503 used to kill the whole panel."""
+    and temporary unavailability (500/502/503), plus hung calls
+    (TimeoutError / read timeouts — a degraded Gemini hangs rather
+    than failing fast). YouTube and Gemini both return these in waves;
+    a single failure used to kill the whole panel."""
     s = str(exc)
-    return any(code in s for code in ("429", "500", "502", "503"))
+    if any(code in s for code in ("429", "500", "502", "503")):
+        return True
+    low = s.lower()
+    return "timed out" in low or "timeout" in low
 
 
 def _api_try(fn):
@@ -602,7 +607,12 @@ def _save_transcript_cache(vid, lang, data):
 
 
 # --- Gemini translation (REST, no new dependency) ----------------------
-_GEMINI_MODEL = "gemini-3.5-flash"  # verified working with the user's key
+# gemini-flash-lite-latest is the translation model: gemini-3.5-flash is
+# severely degraded (40s+ per call, translations time out), while the lite
+# model answers the same prompts in ~1s (verified 2026-11-18). The 3.5
+# model stays as a fallback if the lite alias ever 404s for a key.
+_GEMINI_MODEL = "gemini-flash-lite-latest"
+_GEMINI_MODEL_FALLBACK = "gemini-3.5-flash"
 
 
 def _gemini_key(flask_request):
@@ -611,25 +621,29 @@ def _gemini_key(flask_request):
 
 
 def _gemini_generate(prompt, api_key, timeout=90):
-    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{_GEMINI_MODEL}:generateContent?key=" + urllib.parse.quote(api_key))
     body = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.2},
     }).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=body, method="POST",
-        headers={"Content-Type": "application/json"})
+    models = [_GEMINI_MODEL, _GEMINI_MODEL_FALLBACK]
     raw = None
     last_err = None
     for attempt in range(3):
         if attempt:
             time.sleep(5 if attempt == 1 else 15)
+        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+               f"{models[0]}:generateContent?key=" + urllib.parse.quote(api_key))
+        req = urllib.request.Request(
+            url, data=body, method="POST",
+            headers={"Content-Type": "application/json"})
         try:
             raw = _http_bytes(req, timeout=timeout)
             break
         except Exception as e:
             last_err = e
+            if "404" in str(e) and len(models) > 1:
+                models.pop(0)  # lite alias unknown for this key: fall back
+                continue
             if not _is_retryable_http(e):
                 raise
     else:
@@ -729,23 +743,42 @@ def _get_transcript(vid, lang, flask_request):
                 "language_code": "roman", "is_generated": False,
                 "source_language": src.get("source_language"),
                 "segments": segs}
-    # en / hi / ur — YouTube auto-translate first, Gemini fallback.
+    # en / hi / ur — Gemini first when a key is set (it translates the
+    # already-fetched original; YouTube's auto-translate endpoint
+    # rate-limits translated tracks with HTTP 429 while originals load
+    # fine, and the transcript-API library is IP-blocked / PO-gated).
+    # YouTube auto-translate stays as the fallback (and the only lane
+    # when no Gemini key is set). If both lanes fail, the error names
+    # both so the cause is visible in one line.
     src = _get_source_merged(vid)
     if src.get("source_language") == lang:
         return src
+    key = _gemini_key(flask_request)
+    gemini_err = None
+    if key:
+        try:
+            texts = [s["text"] for s in src["segments"]]
+            translated = _gemini_translate(texts, key, LANG_LABELS[lang])
+            segs = [{**s, "text": t} for s, t in zip(src["segments"], translated)]
+            return {"video_id": vid, "language": LANG_LABELS[lang],
+                    "language_code": lang, "is_generated": True,
+                    "source_language": src.get("source_language"),
+                    "segments": segs}
+        except Exception as e:
+            gemini_err = e
     try:
         raw = _download_subs_vtt(vid, lang)
         if not raw:
             raise RuntimeError("empty subtitle track")
         segs = _merge_sentences(raw)
     except Exception as e:
-        key = _gemini_key(flask_request)
-        if not key:
-            raise RuntimeError("auto-translate failed (%s); add a Gemini API "
-                               "key in Settings to translate instead" % (str(e)[:120],))
-        texts = [s["text"] for s in src["segments"]]
-        translated = _gemini_translate(texts, key, LANG_LABELS[lang])
-        segs = [{**s, "text": t} for s, t in zip(src["segments"], translated)]
+        if key:
+            raise RuntimeError(
+                "translation failed — Gemini: %s; YouTube auto-translate: "
+                "%s. Please retry in a few minutes."
+                % (str(gemini_err)[:110], str(e)[:110]))
+        raise RuntimeError("auto-translate failed (%s); add a Gemini API "
+                           "key in Settings to translate instead" % (str(e)[:120],))
     return {"video_id": vid, "language": LANG_LABELS[lang],
             "language_code": lang, "is_generated": True,
             "source_language": src.get("source_language"),

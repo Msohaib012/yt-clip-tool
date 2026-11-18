@@ -62,11 +62,11 @@ jobs:
           name: YT-Clip-Tool-Portable
           path: YT-Clip-Tool-Portable.zip
 
-      - name: Publish GitHub Release (v1.2.1)
+      - name: Publish GitHub Release (v1.2.2)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.1
-          name: YT Clip Tool v1.2.1 (Windows)
+          tag_name: v1.2.2
+          name: YT Clip Tool v1.2.2 (Windows)
           body: |
             Portable Windows build — double-click, no Python install needed.
             **Recommended: YT-Clip-Tool-Portable.zip** — extract it anywhere and
@@ -75,11 +75,12 @@ jobs:
             The browser opens at http://127.0.0.1:5000 automatically.
             Search YouTube, read the transcript with timestamps, export a clip
             (start → end) or the full video at 720p MP4.
-            **v1.2.1 — what's new:** transcript languages no longer die on a
-            single transient error — YouTube subtitle downloads, the transcript
-            API fallback and Gemini translation now retry HTTP 429/500/502/503
-            with backoff, and a failed translation says plainly to retry in a
-            minute instead of showing a bare 503.
+            **v1.2.2 — what's new:** translations finally fixed — the language
+            tabs now translate with Gemini FIRST (fast lite model, ~1s) instead
+            of depending on YouTube's auto-translate endpoint, which rate-limits
+            translated tracks with HTTP 429 while originals load fine; YouTube
+            stays as the fallback, timeouts are retried, and if both lanes fail
+            the error names both so you can see why.
           files: |
             dist/YT-Clip-Tool.exe
             YT-Clip-Tool-Portable.zip
