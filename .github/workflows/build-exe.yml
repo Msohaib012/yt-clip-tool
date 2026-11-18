@@ -62,11 +62,11 @@ jobs:
           name: YT-Clip-Tool-Portable
           path: YT-Clip-Tool-Portable.zip
 
-      - name: Publish GitHub Release (v1.2.2)
+      - name: Publish GitHub Release (v1.2.3)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.2
-          name: YT Clip Tool v1.2.2 (Windows)
+          tag_name: v1.2.3
+          name: YT Clip Tool v1.2.3 (Windows)
           body: |
             Portable Windows build — double-click, no Python install needed.
             **Recommended: YT-Clip-Tool-Portable.zip** — extract it anywhere and
@@ -75,12 +75,12 @@ jobs:
             The browser opens at http://127.0.0.1:5000 automatically.
             Search YouTube, read the transcript with timestamps, export a clip
             (start → end) or the full video at 720p MP4.
-            **v1.2.2 — what's new:** translations finally fixed — the language
-            tabs now translate with Gemini FIRST (fast lite model, ~1s) instead
-            of depending on YouTube's auto-translate endpoint, which rate-limits
-            translated tracks with HTTP 429 while originals load fine; YouTube
-            stays as the fallback, timeouts are retried, and if both lanes fail
-            the error names both so you can see why.
+            **v1.2.3 — what's new:** everything in v1.2.2, plus the original
+            track is now fetched as `{lang}-orig` (YouTube resolves a bare
+            code like `en` to the auto-translated track, which it rate-limits
+            with HTTP 429 — yt-dlp#13831), with a fallback to the bare code
+            for videos with manual captions only, and subtitle requests are
+            paced to stay under the rate limit.
           files: |
             dist/YT-Clip-Tool.exe
             YT-Clip-Tool-Portable.zip

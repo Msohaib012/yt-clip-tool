@@ -78,7 +78,7 @@ def _default_download_dir():
 
 
 CONFIG_PATH = _writable_base() / "config.json"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 
 
 def _load_config():
@@ -507,46 +507,72 @@ def _source_lang(vid):
     return (info or {}).get("language")
 
 
-def _download_subs_vtt(vid, lang):
+def _download_subs_vtt(vid, lang, native=False):
     """Download one auto-sub track (original or auto-translated) as VTT.
     Returns raw segments. Retries up to 3 times on transient YouTube
     errors (HTTP 429/500/502/503) with backoff — a single 503 used to
-    kill the whole transcript panel."""
+    kill the whole transcript panel.
+    With native=True (the video's own original track), request
+    ``{lang}-orig`` first: since Sep 2026 YouTube resolves a bare code
+    like ``en`` to the auto-translated track, which it rate-limits with
+    HTTP 429 (yt-dlp#13831). Falls back to the bare code when no -orig
+    track exists (e.g. manual captions). Translated tracks are never
+    requested with -orig — they are translated with Gemini instead."""
     url = f"https://www.youtube.com/watch?v={vid}"
     tmp = Path(tempfile.mkdtemp(prefix="ytclip_subs_"))
     try:
-        def run(nocheck):
+        def run(nocheck, sublang):
             opts = {**_ydl_base_opts(), "quiet": True, "noplaylist": True,
                     "noprogress": True, "skip_download": True,
-                    "writeautomaticsub": True, "sublangs": [lang],
+                    "writeautomaticsub": True, "sublangs": [sublang],
                     "subformat": "vtt", "outtmpl": str(tmp / "%(id)s"),
+                    "sleep_subtitles": 5,
                     "nocheckcertificate": nocheck}
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
-        last_err = None
-        for attempt in range(3):
-            if attempt:
-                time.sleep(5 if attempt == 1 else 15)
+
+        def fetch_one(sublang):
+            last_err = None
+            for attempt in range(3):
+                if attempt:
+                    time.sleep(5 if attempt == 1 else 15)
+                try:
+                    run(False, sublang)
+                    break
+                except Exception as e:
+                    last_err = e
+                    if _is_ssl_error(e):
+                        try:
+                            run(True, sublang)
+                            break
+                        except Exception as e2:
+                            last_err = e2
+                    if not _is_retryable_http(last_err):
+                        raise last_err
+            else:
+                raise last_err
+            vtts = sorted(tmp.glob("*.vtt"))
+            if not vtts:
+                raise RuntimeError("no subtitle file produced")
+            pick = next((p for p in vtts if f".{sublang}." in p.name),
+                        vtts[0])
+            return _parse_vtt(
+                pick.read_text(encoding="utf-8", errors="replace"))
+
+        if native:
             try:
-                run(False)
-                break
+                segs = fetch_one(f"{lang}-orig")
+                if segs:
+                    return segs
             except Exception as e:
-                last_err = e
-                if _is_ssl_error(e):
-                    try:
-                        run(True)
-                        break
-                    except Exception as e2:
-                        last_err = e2
-                if not _is_retryable_http(last_err):
-                    raise last_err
-        else:
-            raise last_err
-        vtts = sorted(tmp.glob("*.vtt"))
-        if not vtts:
-            raise RuntimeError("no subtitle file produced")
-        pick = next((p for p in vtts if f".{lang}." in p.name), vtts[0])
-        return _parse_vtt(pick.read_text(encoding="utf-8", errors="replace"))
+                # No native track (e.g. manual captions only): try the bare
+                # code. Any other failure (429/503/…) is re-raised — the
+                # bare code would hit the same rate limit, so retrying it
+                # only burns time before the API fallback.
+                if "no subtitle file produced" not in str(e):
+                    raise
+            return fetch_one(lang)
+        return fetch_one(lang)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -707,7 +733,7 @@ def _get_source_merged(vid):
     lang_code = src_lang or "auto"
     if src_lang:
         try:
-            segs = _download_subs_vtt(vid, src_lang)
+            segs = _download_subs_vtt(vid, src_lang, native=True)
         except Exception:
             segs = None
     if not segs:
