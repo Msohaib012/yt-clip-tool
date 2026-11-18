@@ -78,7 +78,7 @@ def _default_download_dir():
 
 
 CONFIG_PATH = _writable_base() / "config.json"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 
 def _load_config():
@@ -198,6 +198,25 @@ def _ydl_base_opts():
 
 def _is_ssl_error(exc) -> bool:
     return "CERTIFICATE_VERIFY_FAILED" in str(exc) or "SSL" in str(exc)
+
+
+def _is_retryable_http(exc) -> bool:
+    """Transient server-side failures worth retrying: rate limit (429)
+    and temporary unavailability (500/502/503). YouTube and Gemini both
+    return these in waves; a single 503 used to kill the whole panel."""
+    s = str(exc)
+    return any(code in s for code in ("429", "500", "502", "503"))
+
+
+def _api_try(fn):
+    """One call with a single retry (5s) on transient server errors."""
+    try:
+        return fn()
+    except Exception as e:
+        if _is_retryable_http(e):
+            time.sleep(5)
+            return fn()
+        raise
 
 
 def _extract_with_cert_retry(make_ydl, fn):
@@ -462,12 +481,18 @@ def _source_lang(vid):
     def _info(ydl):
         return ydl.extract_info(
             f"https://www.youtube.com/watch?v={vid}", download=False)
-    try:
-        info = _extract_with_cert_retry(
-            lambda nocheck: {**_ydl_base_opts(), "nocheckcertificate": nocheck},
-            _info)
-    except Exception:
-        return None
+    info = None
+    for attempt in range(2):
+        try:
+            info = _extract_with_cert_retry(
+                lambda nocheck: {**_ydl_base_opts(), "nocheckcertificate": nocheck},
+                _info)
+            break
+        except Exception as e:
+            if _is_retryable_http(e) and attempt == 0:
+                time.sleep(5)
+                continue
+            return None
     caps = (info or {}).get("automatic_captions") or {}
     for code in caps:
         if code.endswith("-orig"):
@@ -479,7 +504,9 @@ def _source_lang(vid):
 
 def _download_subs_vtt(vid, lang):
     """Download one auto-sub track (original or auto-translated) as VTT.
-    Returns raw segments. Retries once on HTTP 429."""
+    Returns raw segments. Retries up to 3 times on transient YouTube
+    errors (HTTP 429/500/502/503) with backoff — a single 503 used to
+    kill the whole transcript panel."""
     url = f"https://www.youtube.com/watch?v={vid}"
     tmp = Path(tempfile.mkdtemp(prefix="ytclip_subs_"))
     try:
@@ -491,16 +518,25 @@ def _download_subs_vtt(vid, lang):
                     "nocheckcertificate": nocheck}
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
-        try:
-            run(False)
-        except Exception as e:
-            if _is_ssl_error(e):
-                run(True)
-            elif "429" in str(e):
-                time.sleep(5)
+        last_err = None
+        for attempt in range(3):
+            if attempt:
+                time.sleep(5 if attempt == 1 else 15)
+            try:
                 run(False)
-            else:
-                raise
+                break
+            except Exception as e:
+                last_err = e
+                if _is_ssl_error(e):
+                    try:
+                        run(True)
+                        break
+                    except Exception as e2:
+                        last_err = e2
+                if not _is_retryable_http(last_err):
+                    raise last_err
+        else:
+            raise last_err
         vtts = sorted(tmp.glob("*.vtt"))
         if not vtts:
             raise RuntimeError("no subtitle file produced")
@@ -512,7 +548,8 @@ def _download_subs_vtt(vid, lang):
 
 def _fetch_original_api(vid):
     """Fallback: youtube-transcript-api (works on a residential PC;
-    blocked from datacenter IPs). Returns raw segments."""
+    blocked from datacenter IPs). Returns raw segments. Each call gets
+    one retry on transient YouTube errors (429/500/502/503)."""
     if YouTubeTranscriptApi is None:
         raise RuntimeError("youtube-transcript-api not installed")
     api = YouTubeTranscriptApi()
@@ -520,16 +557,16 @@ def _fetch_original_api(vid):
     last_err = None
     for lg in ["en", "hi", "ur"]:
         try:
-            fetched = api.fetch(vid, languages=[lg])
+            fetched = _api_try(lambda: api.fetch(vid, languages=[lg]))
             break
         except Exception as e:
             last_err = e
     if fetched is None:
         try:
-            tlist = api.list(vid)
+            tlist = _api_try(lambda: api.list(vid))
             first = next(iter(tlist), None)
             if first is not None:
-                fetched = first.fetch()
+                fetched = _api_try(lambda: first.fetch())
         except Exception as e:
             last_err = e
     if fetched is None:
@@ -583,7 +620,23 @@ def _gemini_generate(prompt, api_key, timeout=90):
     req = urllib.request.Request(
         url, data=body, method="POST",
         headers={"Content-Type": "application/json"})
-    data = json.loads(_http_bytes(req, timeout=timeout).decode("utf-8", "replace"))
+    raw = None
+    last_err = None
+    for attempt in range(3):
+        if attempt:
+            time.sleep(5 if attempt == 1 else 15)
+        try:
+            raw = _http_bytes(req, timeout=timeout)
+            break
+        except Exception as e:
+            last_err = e
+            if not _is_retryable_http(e):
+                raise
+    else:
+        raise RuntimeError(
+            "Gemini is temporarily unavailable (%s) — please retry in a "
+            "minute" % (str(last_err)[:80],))
+    data = json.loads(raw.decode("utf-8", "replace"))
     parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
     return "".join(p.get("text", "") for p in parts)
 
