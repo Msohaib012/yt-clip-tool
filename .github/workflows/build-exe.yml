@@ -65,8 +65,8 @@ jobs:
       - name: Publish GitHub Release (v1.2.3)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.3
-          name: YT Clip Tool v1.2.3 (Windows)
+          tag_name: v1.2.4
+          name: YT Clip Tool v1.2.4 (Windows)
           body: |
             Portable Windows build — double-click, no Python install needed.
             **Recommended: YT-Clip-Tool-Portable.zip** — extract it anywhere and
@@ -75,12 +75,13 @@ jobs:
             The browser opens at http://127.0.0.1:5000 automatically.
             Search YouTube, read the transcript with timestamps, export a clip
             (start → end) or the full video at 720p MP4.
-            **v1.2.3 — what's new:** everything in v1.2.2, plus the original
-            track is now fetched as `{lang}-orig` (YouTube resolves a bare
-            code like `en` to the auto-translated track, which it rate-limits
-            with HTTP 429 — yt-dlp#13831), with a fallback to the bare code
-            for videos with manual captions only, and subtitle requests are
-            paced to stay under the rate limit.
+            **v1.2.4 — what's new:** everything in v1.2.3, plus YouTube
+            sign-in is now passed to yt-dlp via your Chrome cookies
+            (`cookiesfrombrowser`), so downloads that failed with
+            "Download failed. -from-browser or --cookies for the
+            authentication" now work as your logged-in YouTube account.
+            If Chrome cookies cannot be read, the tool retries without
+            them (old behaviour) instead of failing.
           files: |
             dist/YT-Clip-Tool.exe
             YT-Clip-Tool-Portable.zip

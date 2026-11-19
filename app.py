@@ -78,7 +78,7 @@ def _default_download_dir():
 
 
 CONFIG_PATH = _writable_base() / "config.json"
-APP_VERSION = "1.2.3"
+APP_VERSION = "1.2.4"
 
 
 def _load_config():
@@ -188,12 +188,34 @@ def _ffmpeg_location():
     return _ffmpeg_dir()
 
 
-def _ydl_base_opts():
+def _ydl_base_opts(use_cookies=True):
+    # v1.2.4 (2026-11-19): YouTube now requires a signed-in session for
+    # many downloads (yt-dlp: "Download failed. -from-browser or
+    # --cookies for the authentication"). Pass the user's Chrome cookies
+    # so yt-dlp downloads as his logged-in YouTube account. Chrome is
+    # his browser (he is logged into YouTube there). yt-dlp copies the
+    # cookie DB, so it works while Chrome is running. If cookie
+    # extraction itself fails (no Chrome / locked profile), callers retry
+    # with use_cookies=False — the old behaviour — instead of dying.
     opts = {"quiet": True, "noplaylist": True, "noprogress": True}
+    if use_cookies:
+        opts["cookiesfrombrowser"] = ("chrome",)
     ff = _ffmpeg_location()
     if ff:
         opts["ffmpeg_location"] = ff
     return opts
+
+
+def _is_cookie_error(exc) -> bool:
+    # yt-dlp raises when it cannot read the browser cookies (no Chrome,
+    # locked/encrypted profile, or the browser name is wrong). Those
+    # errors mention cookies / the browser. A YouTube sign-in-required
+    # error is NOT a cookie error — it means cookies were missing, which
+    # is fixed by passing them, not by retrying without them.
+    low = str(exc).lower()
+    return ("cookie" in low or "cookiesfrombrowser" in low
+            or "could not copy" in low and "browser" in low
+            or "failed to load cookies" in low)
 
 
 def _is_ssl_error(exc) -> bool:
@@ -226,11 +248,16 @@ def _api_try(fn):
 
 def _extract_with_cert_retry(make_ydl, fn):
     """Run fn(ydl); if it dies on an SSL/cert error, retry once with
-    nocheckcertificate (VM/proxy case)."""
+    nocheckcertificate (VM/proxy case). If it dies because the browser
+    cookies could not be read, retry once without cookies (old
+    behaviour) — a missing Chrome must not break metadata/subtitles."""
     try:
         with yt_dlp.YoutubeDL(make_ydl(False)) as ydl:
             return fn(ydl)
     except Exception as e:
+        if _is_cookie_error(e):
+            with yt_dlp.YoutubeDL(make_ydl(False, use_cookies=False)) as ydl:
+                return fn(ydl)
         if _is_ssl_error(e):
             with yt_dlp.YoutubeDL(make_ydl(True)) as ydl:
                 return fn(ydl)
@@ -299,7 +326,7 @@ def api_search():
                     f"https://www.youtube.com/watch?v={vid}", download=False)
 
             info = _extract_with_cert_retry(
-                lambda nocheck: {**_ydl_base_opts(),
+                lambda nocheck, use_cookies=True: {**_ydl_base_opts(use_cookies),
                                  "nocheckcertificate": nocheck}, _one)
             if not info:
                 return jsonify({"error": "video not found"}), 404
@@ -317,7 +344,7 @@ def api_search():
             return ydl.extract_info(f"ytsearch10:{q}", download=False)
 
         info = _extract_with_cert_retry(
-            lambda nocheck: {**_ydl_base_opts(), "flat_playlist": True,
+            lambda nocheck, use_cookies=True: {**_ydl_base_opts(use_cookies), "flat_playlist": True,
                              "extract_flat": True,
                              "nocheckcertificate": nocheck}, _search)
         results = []
@@ -490,7 +517,7 @@ def _source_lang(vid):
     for attempt in range(2):
         try:
             info = _extract_with_cert_retry(
-                lambda nocheck: {**_ydl_base_opts(), "nocheckcertificate": nocheck},
+                lambda nocheck, use_cookies=True: {**_ydl_base_opts(use_cookies), "nocheckcertificate": nocheck},
                 _info)
             break
         except Exception as e:
@@ -521,8 +548,8 @@ def _download_subs_vtt(vid, lang, native=False):
     url = f"https://www.youtube.com/watch?v={vid}"
     tmp = Path(tempfile.mkdtemp(prefix="ytclip_subs_"))
     try:
-        def run(nocheck, sublang):
-            opts = {**_ydl_base_opts(), "quiet": True, "noplaylist": True,
+        def run(nocheck, sublang, use_cookies=True):
+            opts = {**_ydl_base_opts(use_cookies), "quiet": True, "noplaylist": True,
                     "noprogress": True, "skip_download": True,
                     "writeautomaticsub": True, "sublangs": [sublang],
                     "subformat": "vtt", "outtmpl": str(tmp / "%(id)s"),
@@ -541,6 +568,12 @@ def _download_subs_vtt(vid, lang, native=False):
                     break
                 except Exception as e:
                     last_err = e
+                    if _is_cookie_error(e):
+                        try:
+                            run(False, sublang, use_cookies=False)
+                            break
+                        except Exception as e2:
+                            last_err = e2
                     if _is_ssl_error(e):
                         try:
                             run(True, sublang)
@@ -966,8 +999,8 @@ def _run_export(job_id, video_id, title, start, end, mode, precise, quality):
         if d.get("status") == "started":
             _set_job(job_id, message="Processing…", progress=99.0)
 
-    def build_opts(nocheck=False, fmt=None):
-        opts = {**_ydl_base_opts(), "quiet": False, "noprogress": True,
+    def build_opts(nocheck=False, fmt=None, use_cookies=True):
+        opts = {**_ydl_base_opts(use_cookies), "quiet": False, "noprogress": True,
                 "format": fmt or _format_for(quality), "outtmpl": outtmpl,
                 "nocheckcertificate": nocheck,
                 "progress_hooks": [progress_hook],
@@ -1000,7 +1033,14 @@ def _run_export(job_id, video_id, title, start, end, mode, precise, quality):
         except _Cancelled:
             raise
         except Exception as e:
-            if _is_ssl_error(e):
+            if _is_cookie_error(e):
+                # Chrome cookies could not be read (no Chrome / locked
+                # profile) — retry without them (old behaviour) instead
+                # of failing the export outright.
+                _set_job(job_id, message="Retrying download…")
+                with yt_dlp.YoutubeDL(build_opts(False, use_cookies=False)) as ydl:
+                    ydl.download([url])
+            elif _is_ssl_error(e):
                 _set_job(job_id, message="Retrying download…")
                 with yt_dlp.YoutubeDL(build_opts(True)) as ydl:
                     ydl.download([url])
